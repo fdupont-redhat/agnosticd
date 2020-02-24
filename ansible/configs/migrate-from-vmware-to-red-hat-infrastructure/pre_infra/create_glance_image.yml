@@ -1,0 +1,25 @@
+---
+- block:
+    - name: "Download '{{ image.name }}' qcow2 image"
+      get_url:
+        url: "{{ image.url }}"
+        dest: "/tmp/workdir/{{ image.url | basename }}"
+
+    - name: "Create '{{ image.name }}' Glance image from the qcow2 image"
+      os_image:
+        auth: "{{ osp_auth }}"
+        validate_certs: no
+        name: "{{ image.name }}"
+        container_format: bare
+        disk_format: qcow2
+        filename: "/tmp/workdir/{{ image.url | basename }}"
+        is_public: yes
+        state: present
+
+    - name: "Delete /tmp/workdir/{{ image.url | basename }}"
+      file:
+        path: "/tmp/workdir/{{ image.url | basename }}"
+        state: absent
+
+  when:
+    - "image.url is defined"

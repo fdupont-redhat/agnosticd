@@ -1,0 +1,28 @@
+- name: Step 000 Pre Infrastructure
+  hosts: localhost
+  connection: local
+  become: false
+  tags:
+    - step001
+    - pre_infrastructure
+  tasks:
+    - name: Pre-Infra Start
+      debug:
+        msg: "Pre-Infra work starts"
+
+    - include_tasks: common/get_osp_auth.yml
+
+    - include_tasks: pre_infra/create_glance_image.yml
+      loop: "{{ images }}"
+      loop_control:
+        loop_var: image
+
+    - include_tasks: pre_infra/create_nova_flavor.yml
+      loop: "{{ flavors }}"
+      loop_control:
+        loop_var: flavor
+
+    - name: Pre-Infra End
+      debug: 
+        msg: "Pre-Infra work is done"
+

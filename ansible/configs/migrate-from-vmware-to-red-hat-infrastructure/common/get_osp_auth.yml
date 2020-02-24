@@ -1,0 +1,10 @@
+---
+- name: Generate OpenStack authentication hash
+  set_fact:
+    osp_auth:
+      auth_url: "{{ osp_auth_url }}"
+      username: "{{ osp_auth_username }}"
+      password: "{{ osp_auth_password }}"
+      project_name: "{{ osp_project_name }}"
+      os_user_domain_name: "{{ osp_auth_user_domain }}"
+      os_project_domain_name: "{{ osp_auth_project_domain }}"
