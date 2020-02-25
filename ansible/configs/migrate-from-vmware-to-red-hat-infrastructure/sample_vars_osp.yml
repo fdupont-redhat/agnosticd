@@ -6,3 +6,74 @@ cloud_provider: osp
 guid: imstorhi01
 osp_cluster_dns_zone: red.osp.opentlc.com
 
+images: []
+
+networks:
+  - name: internal
+    shared: false
+    create_router: true
+    subnet_cidr: 192.168.0.0/24
+    gateway_ip: 192.168.0.1
+    allocation_start: 192.168.0.2
+    allocation_end: 192.168.0.254
+
+security_groups:
+  - name: ssh
+    rules:
+      - name: ssh
+        direction: ingress
+        protocol: tcp
+        port_range_min: 22
+        port_range_max: 22
+        remote_ip_prefix: 0.0.0.0/0
+  - name: pxe_server
+    rules:
+      - name: dhcp
+        direction: ingress
+        protocol: udp
+        port_range_min: 67
+        port_range_max: 67
+        remote_ip_prefix: 192.168.0.0/24
+  - name: tftp_server
+    rules:
+      - name: tftp
+        direction: ingress
+        protocol: udp
+        port_range_min: 69
+        port_range_max: 69
+        remote_ip_prefix: 192.168.0.0/24
+  - name: dns_server
+    rules:
+      - name: dns
+        protocol: udp
+        port_range_min: 53
+        port_range_max: 53
+        remote_ip_prefix: 192.168.0.0/24
+
+flavors:
+  - name: bastion
+    vcpus: 2
+    ram: 4096
+    disk: 20
+  - name: manager
+    vcpus: 4
+    ram: 8192
+    disk: 40
+  - name: hypervisor
+    vcpus: 16
+    ram: 32768
+    disk: 200
+
+instances:
+  - name: bastion
+    count: 1
+    image: rhel-8.1
+    network: internal
+    security_groups:
+      - ssh
+      - dns_server
+      - tftp_server
+      - dhcp_server
+    floating_ip: true
+    flavor:
+      osp: "{{ guid }}-bastion-flavor"
