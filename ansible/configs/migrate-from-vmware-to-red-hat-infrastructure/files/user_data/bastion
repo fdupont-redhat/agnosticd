@@ -1,0 +1,16 @@
+        yum_repos:
+          rhel-7-server-rpms:
+            name: rhel-7-server-rpms
+            baseurl: "{{ own_repo_path }}/rhel-7-server-rpms"
+            enabled: true
+          rhel-7-server-ansible-2.9-rpms:
+            name: rhel-7-server-rpms
+            baseurl: "{{ own_repo_path }}/rhel-7-server-ansible-2.9-rpms"
+            enabled: true
+        packages:
+          - ansible
+          - git
+        run_cmd:
+          - [ "git", "clone", "https://github.com/fdupont-redhat/summit2020-ims-lab" ]
+          - [ "ansible-playbook", "-i", "localhost,", "summit2020-ims-lab/deploy.yml" ]
+        

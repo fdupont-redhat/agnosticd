@@ -9,217 +9,341 @@ description: >-
 
 resources:
 
-  {{ guid }}-infra_key:
+###############################################################################
+# Key pair
+###############################################################################
+
+  {{ guid }}-keypair:
     type: OS::Nova::KeyPair
     properties:
-      name: {{ guid }}-infra_key
+      name: {{ guid }}-keypair
       save_private_key: true
 
-{% if osp_project_create | bool %}
-  {{ guid }}-project_user:
-    type: OS::Keystone::User
+{% if keypairs is defined %}
+  {% for keypair in keypairs %}
+  {{ guid }}-keypair-{{ keypair.name }}:
+    type: OS::Nova::KeyPair
     properties:
-      name: {{ guid }}-user
-      password: {{ heat_user_password }}
-      domain: Default
-
-  {{ guid }}-project_role_user:
-    type: OS::Keystone::UserRoleAssignment
-    properties:
-      user: {get_resource: {{ guid }}-project_user}
-      roles:
-        - {project: {{ osp_project_name }}, role: _member_}
-        - {project: {{ osp_project_name }}, role: swiftoperator}
-    depends_on:
-      - {{ guid }}-project_user
+      name: {{ keypair.name }}
+    {% if keypair.public_key is defined %}
+      public_key: {{ keypair.public_key }}
+    {% else %}
+      save_private_key: true
+    {% endif %}
+  {% endfor %}
+{% else %}
+# No additional keypair to create
 {% endif %}
 
-{% for network in networks %}
-  {{ network['name'] }}-network:
+###############################################################################
+# Glance images
+###############################################################################
+
+{% if images is defined %}
+  {% for image in images %}
+  {{ guid }}-image-{{image.name }}:
+    type: OS::Glance::WebImage
+    properties:
+      name: {{ guid }}-image-{{ image.name }}
+      container_format: {{ image.container_format | default(bare) }}
+      disk_format: {{ image.disk_format | default(qcow2) }}
+      location: {{ image.location }}
+      visibility: {{ image.visibility | default(private) }}
+  {% endfor %}
+{% else %}
+# No glance image to create
+{% endif %}
+
+###############################################################################
+# Flavors
+###############################################################################
+
+{% if flavors is defined %}
+  {% for flavor in flavors %}
+  {{ guid }}-flavor-{{ flavor.name }}:
+    type: OS::Nova::Flavor
+    properties:
+      name: "{{ guid }}-flavor-{{ flavor.name }}"
+      vcpus: {{ flavor.vcpus }}
+      ram: {{ flavor.ram }}
+      disk: {{ flavor.disk }}
+      is_public: {{ flavor.is_public | default(false) }}
+  {% endfor %}
+{% else %}
+# No flavor to create
+{% endif %}
+
+###############################################################################
+# Networks, subnets and routers
+###############################################################################
+
+{% if networks is defined %}
+  {% for network in networks %}
+  {{ guid }}-network-{{ network.name }}:
     type: OS::Neutron::Net
     properties:
-      name: "{{ guid }}-{{ network['name'] }}-network"
-      shared: {{ network['shared'] }}
+      name: "{{ guid }}-network-{{ network.name }}"
+      shared: {{ network.shared | default(false) }}
+    {% if network.dns_domain is defined %}
+      dns_domain: {{ network.dns_domain }}
+    {% endif %}
 
-  {{ network['name'] }}-subnet:
+    {% if network.subnets is defined %}
+      {% for subnet in network.subnets %}
+  {{ guid }}-network-{{ network.name }}-subnet-{{ subnet.name }}:
     type: OS::Neutron::Subnet
     properties:
-      name: "{{ guid }}-{{ network['name'] }}-subnet"
-      network_id: {get_resource: {{ network['name'] }}-network}
-{% if network['dns_nameservers'] is defined %}
-      dns_nameservers: [{{ network['dns_nameservers'] | list | join(",") }}]
-{% endif %}
-      cidr: {{ network['subnet_cidr'] }}
-      gateway_ip: {{ network['gateway_ip'] }}
+      name: "{{ guid }}-network-{{ network.name }}-subnet-{{ subnet.name }}"
+      network_id: { get_resource: {{ guid }}-network-{{ network.name }} }
+        {% if subnet.dns_nameservers is defined %}
+      dns_nameservers: [{{ subnet.dns_nameservers | list | join(",") }}]
+        {% endif %}
+      cidr: {{ subnet.cidr }}
+      gateway_ip: {{ subnet.gateway_ip }}
+        {% if subnet.allocation_pools is defined %}
       allocation_pools:
-        - start: {{ network['allocation_start'] }}
-          end: {{ network['allocation_end'] }}
+          {% for allocation_pool in subnet.allocation_pools %}
+        - start: {{ allocation_pool.start }}
+          end: {{ allocation_pool.end }}
+          {% endfor %}
+        {% endif %}
+    depends_on:
+      - {{ guid }}-network-{{ network.name }}
+      {% endfor %}
+    {% else %}
+# No subnet to create for '{{ guid }}-network-{{ network.name }}' network
+    {% endif %}
 
-{% if network['create_router'] %}
-  {{ network['name'] }}-router:
+    {% if network.create_router %}
+  {{ guid }}-network-{{ network.name }}-router:
     type: OS::Neutron::Router
     properties:
-      name: "{{ guid }}-{{ network['name'] }}-router"
+      name: "{{ guid }}-network-{{ network.name }}-router"
       external_gateway_info:
         network: "{{ provider_network }}"
 
-  {{ network['name'] }}-router_private_interface:
+      {% if network.subnets is defined %}
+        {% for subnet in network.subnets %}
+          {% if subnet.routed %}
+  {{ guid }}-router-{{ network.name }}-iface-{{ subnet.name }}:
     type: OS::Neutron::RouterInterface
     properties:
-      router: {get_resource: {{ network['name'] }}-router}
-      subnet: {get_resource: {{ network['name'] }}-subnet}
+      router: { get_resource: {{ guid }}-network-{{ network.name }}-router }
+      subnet: { get_resource: {{ guid }}-network-{{ network.name }}-subnet-{{ subnet.name }} }
+    depends_on:
+      - {{ guid }}-network-{{ network.name }}-router
+      - {{ guid }}-network-{{ network.name }}-subnet-{{ subnet.name }}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% else %}
+# No router to create for '{{ guid }}-network-{{ network.name }}' network
+    {% endif %}
+  {% endfor %}
+{% else %}
+# No network to create
 {% endif %}
-{% endfor %}
 
-  ###################
-  # Security groups #
-  ###################
-{% for security_group in security_groups | list %}
-  {{ security_group['name'] }}:
+###############################################################################
+# Security groups
+###############################################################################
+
+{% if security_groups is defined %}
+  {% for security_group in security_groups | list %}
+  {{ guid }}-secgrp-{{ security_group.name }}:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: {{ guid }}-{{ security_group['name'] }}
-{% if security_group['description'] is defined %}
-      description: "{{ security_group['description'] }}"
-{% endif %}
+      name: {{ guid }}-secgrp-{{ security_group.name }}
+    {% if security_group.description is defined %}
+      description: "{{ security_group.description }}"
+    {% endif %}
 
-{% for rule in security_group.rules %}
-{% if rule['name'] is defined %}
-  {{ guid }}-{{ security_group['name'] }}-rule_{{ rule['name'] }}:
-{% else %}
-  {{ guid }}-{{ security_group['name'] }}-rule_{{ lookup('password', '/dev/null length=5 chars=ascii_letters,digits') }}:
-{% endif %}
+    {% if security_group.rules is defined %}
+      {% for rule in security_group.rules %}
+        {% if rule.name is defined %}
+  {{ guid }}-secgrp-{{ security_group.name }}-rule-{{ rule.name }}:
+        {% else %}
+  {{ guid }}-secgrp-{{ security_group.name }}-rule-{{ lookup('password', '/dev/null length=5 chars=ascii_letters,digits') }}:
+        {% endif %}
     type: OS::Neutron::SecurityGroupRule
     properties:
-      security_group: {get_resource: {{ security_group['name'] }}}
-      direction: {{ rule['direction'] | default(rule.rule_type) | lower }}
-      protocol: {{ rule['protocol'] | lower }}
-{% if rule['description'] is defined %}
-      description: {{ rule['description'] }}
-{% endif %}
-{% if rule['port_range_min'] is defined or
-  rule.from_port is defined %}
-      port_range_min: {{ rule['port_range_min'] | default(rule.from_port) }}
-{% endif %}
-{% if rule['port_range_max'] is defined or
-  rule.to_port is defined %}
-      port_range_max: {{ rule['port_range_max'] | default(rule.to_port) }}
-{% endif %}
-{% if rule['remote_ip_prefix'] is defined or
-  rule.cidr is defined %}
-      remote_ip_prefix: {{ rule['remote_ip_prefix'] | default(rule.cidr) }}
-{% endif %}
-{% if rule['remote_group'] is defined or
-  rule.from_group is defined %}
-      remote_group: {get_resource: {{ rule['remote_group'] | default(rule.from_group) }}}
-{% endif %}
-    depends_on: {{ security_group['name'] }}
-{% endfor %}
-{% endfor %}
+      security_group: { get_resource: {{ guid }}-secgrp-{{ security_group.name }} }
+      direction: {{ rule.direction | lower }}
+      protocol: {{ rule.protocol | lower }}
+        {% if rule.description is defined %}
+      description: {{ rule.description }}
+        {% endif %}
+        {% if rule.port_range_min is defined %}
+      port_range_min: {{ rule.port_range_min }}
+        {% endif %}
+        {% if rule.port_range_max is defined %}
+      port_range_max: {{ rule.port_range_max }}
+        {% endif %}
+        {% if rule.remote_ip_prefix is defined %}
+      remote_ip_prefix: {{ rule.remote_ip_prefix }}
+        {% endif %}
+        {% if rule.remote_group is defined %}
+      remote_group: { get_resource: {{ rule.remote_group }} }
+        {% endif %}
+    depends_on:
+      - {{ guid }}-secgrp-{{ security_group.name }}
+      {% endfor %}
+    {% else %}
+# No rule to create for '{{ guid }}-secgrp-{{ security_group.name }}' security group
+    {% endif %}
 
-  #############
-  # Instances #
-  #############
-{% for instance in instances %}
-  {% for myinstanceindex in range(instance.count|int) %}
-    {% set iname = instance.name if instance.count == 1 else [instance.name, loop.index] | join() %}
-  ########### {{ iname }} ###########
-  port_{{ iname }}:
+  {% endfor %}
+{% else %}
+# No security group to create
+{% endif %}
+
+###############################################################################
+# Instances, ports and floating IPs
+###############################################################################
+
+{% if servers is defined %}
+  {% for server in servers %}
+    {% for serverindex in range(server.count | int) %}
+      {% if server.count == 1 %}
+        {% set server_name = server.name %}
+      {% else %}
+        {% set server_name = [server.name, ("%03d" | format(serverindex,)) ] | join('_') %}
+      {% endif %}
+########### {{ server_name }} ###########
+      {% for portindex in range(server.ports | length) %}
+  {{ guid }}-server-{{ server_name }}-port-{{ portindex }}:
     type: OS::Neutron::Port
     properties:
-      network: { get_resource: {{ instance['network'] | default('default') }}-network }
+      name: {{ guid }}-server-{{ server_name }}-port-{{ portindex }}
+      network: { get_resource: {{ guid }}-network-{{ server.ports[portindex].network }} }
       security_groups:
-    {% if instance.security_groups is defined %}
-      {% for security_group in instance.security_groups %}
-        - {get_resource: {{ security_group }}}
-      {% endfor %}
-    {% endif %}
+        {% if server.ports[portindex].security_groups is defined %}
+          {% for security_group in server.ports[portindex].security_groups %}
+        - { get_resource: {{ guid }}-secgrp-{{ security_group }} }
+          {% endfor %}
+        {% endif %}
+        {% if server.ports[portindex].fixed_ips is defined %}
+      fixed_ips:
+          {% for fixed_ip in server.ports[portindex].fixed_ips %}
+        - subnet: { get_resource: {{ guid }}-network-{{ server.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }} }
+          ip_address: {{ fixed_ip.ip_address }}
+          {% endfor %}
+        {% endif %}
     depends_on:
-      - {{ instance['network'] | default('default') }}-router_private_interface
+      - {{ guid }}-network-{{ server.ports[portindex].network }}
+        {% if server.ports[portindex].fixed_ips is defined %}
+          {% for fixed_ip in server.ports[portindex].fixed_ips %}
+      - {{ guid }}-network-{{ server.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }}
+          {% endfor %}
+        {% endif %}
+        {% if server.ports[portindex].security_groups is defined %}
+          {% for security_group in server.ports[portindex].security_groups %}
+      - {{ guid }}-secgrp-{{ security_group }}
+          {% endfor %}
+        {% endif %}
 
-
-    {% if instance.floating_ip | default(false) or instance.public_dns | default(false) %}
-  fip_{{ iname }}:
+        {% if server.ports[portindex].floating_ip is defined %}
+          {% if server.ports[portindex].floating_ip %}
+  {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}:
     type: OS::Neutron::FloatingIP
     properties:
       floating_network: {{ provider_network }}
     depends_on:
-      - {{ instance['network'] | default('default') }}-router_private_interface
+      - {{ guid }}-network-{{ server.ports[portindex].network }}-router
 
-  fip_association_{{ iname }}:
+  {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}-assoc:
     type: OS::Neutron::FloatingIPAssociation
     properties:
-      floatingip_id: {get_resource: fip_{{ iname }}}
-      port_id: {get_resource: port_{{ iname }}}
-    {% endif %}
+      floatingip_id: { get_resource: {{ guid }}-server-{{ server_name }}-fip-{{ portindex }} }
+      port_id: { get_resource: {{ guid }}-server-{{ server_name }}-port-{{ portindex }} }
+    depends_on:
+      - {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}
+      - {{ guid }}-server-{{ server_name }}-port-{{ portindex }}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
 
-  server_{{ iname }}:
+  {{ guid }}-server-{{ server_name }}:
     type: OS::Nova::Server
     properties:
-      name: {{ iname }}
-      flavor: {{ instance.flavor.osp }}
-      key_name: {get_resource: {{ guid }}-infra_key}
+      name: {{ guid }}-server-{{ server_name }}
+      flavor: {{ server.flavor }}
+      key_name: { get_resource: {{ guid }}-keypair }
 
       block_device_mapping_v2:
-        - image: {{ instance.image_id | default(instance.image) }}
+        - image: {{ server.image_id | default(server.image) }}
           delete_on_termination: true
-          volume_size: {{ instance['rootfs_size'] | default(osp_default_rootfs_size) }}
+          volume_size: {{ server['rootfs_size'] | default(osp_default_rootfs_size) }}
           boot_index: 0
 
       user_data: |
         #cloud-config
         ssh_authorized_keys: {{ all_ssh_authorized_keys | to_json }}
+{{ lookup('file', '../configs/{{ env_type }}/files/user_data/bastion', errors='ignore')}}
       user_data_format: RAW
       networks:
-        - port: {get_resource: port_{{ iname }}}
-    {% if instance['metadata'] is defined %}
-      metadata: {{ instance.metadata | combine(default_metadata) | to_json }}
-    {% endif %}
+      {% for portindex in range(server.ports | length) %}
+        - port: { get_resource: {{ guid }}-server-{{ server_name }}-port-{{ portindex }} }
+      {% endfor %}
+      {% if server.metadata is defined %}
+      metadata: {{ server.metadata | combine(default_metadata) | to_json }}
+      {% endif %}
 
-    {% if instance.tags is defined %}
+      {% if server.tags is defined %}
       # Convert EC2 tags
       metadata:
-      {% for key, value in default_metadata.items() %}
+        {% for key, value in default_metadata.items() %}
         '{{ key }}': {{ value | to_json }}
-      {% endfor %}
-      {% for tag in instance.tags %}
+        {% endfor %}
+        {% for tag in server.tags %}
         '{{ tag.key }}': {{ tag.value | to_json }}
-      {% endfor %}
-    {% endif %}
+        {% endfor %}
+      {% else %}
+# No tag to associate to '{{ server_name }}' server
+      {% endif %}
 
+      {% if server.ports is defined %}
     depends_on:
-      - {{ instance['network'] | default('default') }}-router_private_interface
-    {% if 'security_groups' in instance %}
-      {% for security_group in instance.security_groups %}
-      - {{ security_group }}
-      {% endfor %}
-    {% endif %}
+        {% for portindex in range(server.ports | length) %}
+      - {{ guid }}-network-{{ server.ports[portindex].network }}-router
+        {% endfor %}
+      {% endif %}
 
-    {% if instance.volumes is defined %}
-  #### Volumes for {{ iname }} ####
-      {% for volume in instance.volumes %}
-        {% set loopvolume = loop %}
-        {% set vname = ["volume", iname, loopvolume.index] | join('_') %}
-  {{ vname }}:
+      {% if server.volumes is defined %}
+        {% for volumeindex in range(server.volumes | length) %}
+  {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}:
     type: OS::Cinder::Volume
     properties:
-      size: {{ volume.volume_size | default(volume.size) }}
-          {% if volume.volume_name is defined %}
-      name: {{ volume.volume_name | default(volume.name) }}
-          {% endif %}
+      size: {{ server.volumes[volumeindex].size }}
+      name: {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}
 
-  volume_attachment_{{ vname }}:
+  {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}-attachment:
     type: OS::Cinder::VolumeAttachment
     properties:
-      volume_id: {get_resource: {{ vname }}}
-      instance_uuid: {get_resource: server_{{ iname }}}
-      {% endfor %}
-    {% endif %}
+      volume_id: { get_resource: {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }} }
+      instance_uuid: { get_resource: {{ guid }}-server-{{ server_name }} }
+        {% endfor %}
+      {% else %}
+# No volume to create for '{{ server_name }}' server
+      {% endif %}
+    {% endfor %}
   {% endfor %}
-{% endfor %}
+{% else %}
+# No server to create
+{% endif %}
 
 outputs:
 
-  {{ guid }}-infra_key:
-    description: The SSH infra key
-    value: {get_attr: [{{ guid }}-infra_key, private_key]}
+  {{ guid }}-keypair:
+    description: SSH keypair (default)
+    value: { get_attr: [{{ guid }}-keypair, private_key] }
+
+{% if keypairs is defined %}
+  {% for keypair in keypairs %}
+    {% if keypair.public_key is not defined %}
+  {{ guid }}-keypair-{{ keypair.name }}:
+    description: SSH keypair '{{ keypair.name }}'
+    value: { get_attr: [{{ guid }}-keypair-{{ keypair.name }}, private_key] }
+    {% endif %}
+  {% endfor %}
+{% endif %}

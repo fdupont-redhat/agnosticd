@@ -1,20 +1,35 @@
 ---
-- name: Step 00xxxxx software
+- name: Step 004 Environment specific Software
   hosts: localhost
   gather_facts: False
   become: false
   tasks:
     - debug:
         msg: "Software tasks Started"
-    
-- name: Configuring capsule Hosts
-  hosts: capsules
-  become: True
-  gather_facts: True
-  roles:
-    - { role: "satellite-public-hostname" }
-    - { role: "satellite-capsule-installation",   when: install_capsule }   
-    - { role: "satellite-capsule-configuration",  when: configure_capsule }  
+
+
+- name: Deploy Roles if infra_workloads defined
+  hosts:
+    - nodes
+  gather_facts: false
+  run_once: false
+  become: yes
+  tags:
+    - infra_workloads
+  tasks:
+  - name: apply infra workloads roles on nodes
+    when:
+    - infra_workloads|d("")|length > 0
+    block:
+      - name: Apply role "{{ workload_loop_var }}" on nodes
+        include_role:
+          name: "{{ workload_loop_var }}"
+        vars:
+          ACTION: "provision"
+        loop: "{{ infra_workloads.split(',')|list }}"
+        loop_control:
+          loop_var: workload_loop_var
+
 
 - name: Software flight-check
   hosts: localhost

@@ -1,131 +1,110 @@
-################################################################################
-### OSP Environment variables
-################################################################################
+---
+osp_cluster_dns_zone: blue.osp.opentlc.com
 
-
-cloud_provider: osp                               
-install_student_user: false
-
-
-ansible_user: cloud-user
-remote_user: cloud-user
-osp_cluster_dns_zone: red.osp.opentlc.com
-osp_cluster_dns_server: ddns01.opentlc.com
-use_dynamic_dns: true
-osp_project_create: true
-student_name: student
-admin_user: opentlc-mgr
-
-
-
-capsule_instance_type: 8c32g100d
-
-
-capsule_instance_image: rhel-server-7.7-update-2
-
-capsule_instance_count: 1
+networks:
+  - name: internal
+    shared: false
+    create_router: true
+    subnets:
+      - name: internal
+        cidr: 192.168.128.0/24
+        gateway_ip: 192.168.128.1
+        allocation_pools:
+          - start: 192.168.128.2
+            end: 192.168.128.254
+        routed: true
 
 security_groups:
-  - name: CapsuleSG
+  - name: ssh
     rules:
-      - name: CapSSHPort
-        description: "SSH Public"
-        from_port: 22
-        to_port: 22
+      - name: ssh
+        direction: ingress
         protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapbootpsPorts
-        description: "bootps Public"
-        from_port: 67
-        to_port: 67
+        port_range_min: 22
+        port_range_max: 22
+        remote_ip_prefix: 0.0.0.0/0
+  - name: dhcp_server
+    rules:
+      - name: dhcp
+        direction: ingress
         protocol: udp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapftftpPorts
-        description: "tftp Public"
-        from_port: 69
-        to_port: 69
+        port_range_min: 67
+        port_range_max: 67
+        remote_ip_prefix: 192.168.128.0/24
+  - name: tftp_server
+    rules:
+      - name: tftp
+        direction: ingress
         protocol: udp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapHTTPSPorts
-        description: "HTTP Public"
-        from_port: 80
-        to_port: 80
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapHTTPSPorts
-        description: "HTTPS Public"
-        from_port: 443
-        to_port: 443
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapCommplexPorts
-        description: "Commplex Public"
-        from_port: 5000
-        to_port: 5000
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapCoPorts
-        description: "Co Public"
-        from_port: 5647
-        to_port: 5647
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapiRDMIPorts
-        description: "iRDMIPublic"
-        from_port: 8000
-        to_port: 8000
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapRDMIPorts
-        description: "RDMIPublic"
-        from_port: 8140
-        to_port: 8140
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CappcsyncPorts
-        description: "pcsync Public"
-        from_port: 8443
-        to_port: 8443
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
-      - name: CapwebsbPorts
-        description: "websb Public"
-        from_port: 9090
-        to_port: 9090
-        protocol: tcp
-        cidr: "0.0.0.0/0"
-        rule_type: Ingress
+        port_range_min: 69
+        port_range_max: 69
+        remote_ip_prefix: 192.168.128.0/24
+  - name: dns_server
+    rules:
+      - name: dns
+        direction: ingress
+        protocol: udp
+        port_range_min: 53
+        port_range_max: 53
+        remote_ip_prefix: 192.168.128.0/24
 
-
-# Environment Instances
-instances:
-  - name: "capsule"
-    count: "{{capsule_instance_count}}"
+servers:
+  - name: bastion
+    count: 1
+    image: rhel-server-7.7
+    flavor: rhmms-small
+    ports:
+      - network: internal
+        mac_address: fa:16:3e:00:00:ff
+        fixed_ips:
+          - subnet: internal
+            ip_address: 192.168.128.254
+        floating_ip: true
+        security_groups:
+          - ssh
+          - dns_server
+          - tftp_server
+          - dhcp_server
     public_dns: true
-    floating_ip: true
-    image_id: "{{ capsule_instance_image }}"
-    flavor:
-      ec2: "{{capsule_instance_type}}"
-      osp: "{{capsule_instance_type}}"
-      azure: Standard_A2_V2
-    image_id: "{{ capsule_instance_image }}"
-    security_groups: 
-      - CapsuleSG
     tags:
       - key: "AnsibleGroup"
-        value: "capsules"
+        value: "bastions"
       - key: "ostype"
         value: "linux"
       - key: "instance_filter"
         value: "{{ env_type }}-{{ email }}"
-
+    volumes:
+      - size: 20
+    yum_repos:
+      - rhel-7-server-rpms
+      - rhel-7-server-ansible-2.9-rpms
+  - name: vcenter
+    count: 1
+    image: rhel-server-7.7
+    flavor: rhmms-medium
+    ports:
+      - network: internal
+        mac_address: fa:16:3e:00:00:10
+        fixed_ips:
+          - subnet: internal
+            ip_address: 192.168.128.10
+        security_groups:
+          - ssh
+    public_dns: false
+    volumes:
+      - size: 40
+  - name: esx1
+    count: 1
+    image: rhel-server-7.7
+    flavor: rhmms-xlarge
+    ports:
+      - network: internal
+        mac_address: fa:16:3e:00:00:11
+        fixed_ips:
+          - subnet: internal
+            ip_address: 192.168.128.11
+        security_groups:
+          - ssh
+    public_dns: false
+    volumes:
+      - size: 200

@@ -1,6 +1,6 @@
 ---
 #CHANGEME
-guid: testgucore                                         # Your Global UNIQUE Identifier
+guid: testimslab                                         # Your Global UNIQUE Identifier
 
 env_type: migrate-from-vmware-to-red-hat-infrastructure  # Name of config to deploy
 cloud_provider: osp                                      # Which AgnosticD Cloud Provider to use
