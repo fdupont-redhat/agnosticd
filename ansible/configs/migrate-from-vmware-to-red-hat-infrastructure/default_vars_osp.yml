@@ -1,5 +1,5 @@
 ---
-osp_cluster_dns_zone: blue.osp.opentlc.com
+#osp_cluster_dns_zone: blue.osp.opentlc.com
 
 networks:
   - name: internal
@@ -78,33 +78,3 @@ servers:
     yum_repos:
       - rhel-7-server-rpms
       - rhel-7-server-ansible-2.9-rpms
-  - name: vcenter
-    count: 1
-    image: rhel-server-7.7
-    flavor: rhmms-medium
-    ports:
-      - network: internal
-        mac_address: fa:16:3e:00:00:10
-        fixed_ips:
-          - subnet: internal
-            ip_address: 192.168.128.10
-        security_groups:
-          - ssh
-    public_dns: false
-    volumes:
-      - size: 40
-  - name: esx1
-    count: 1
-    image: rhel-server-7.7
-    flavor: rhmms-xlarge
-    ports:
-      - network: internal
-        mac_address: fa:16:3e:00:00:11
-        fixed_ips:
-          - subnet: internal
-            ip_address: 192.168.128.11
-        security_groups:
-          - ssh
-    public_dns: false
-    volumes:
-      - size: 200
