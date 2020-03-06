@@ -48,10 +48,10 @@ security_groups:
         port_range_max: 53
         remote_ip_prefix: 192.168.128.0/24
 
-servers:
-  - name: bastion
+instances:
+  - name: "{{ guid }}-server-bastion"
     count: 1
-    image: rhel-server-7.7
+    image: rhel-8.1
     flavor: rhmms-small
     ports:
       - network: internal

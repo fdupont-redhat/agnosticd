@@ -13,10 +13,10 @@ resources:
 # Key pair
 ###############################################################################
 
-  {{ guid }}-keypair:
+  {{ guid }}-infra_key:
     type: OS::Nova::KeyPair
     properties:
-      name: {{ guid }}-keypair
+      name: {{ guid }}-infra_key
       save_private_key: true
 
 {% if keypairs is defined %}
@@ -201,142 +201,137 @@ resources:
 # Instances, ports and floating IPs
 ###############################################################################
 
-{% if servers is defined %}
-  {% for server in servers %}
-    {% for serverindex in range(server.count | int) %}
-      {% if server.count == 1 %}
-        {% set server_name = server.name %}
+{% if instances is defined %}
+  {% for instance in instances %}
+    {% for instanceindex in range(instance.count | default(1) | int) %}
+      {% if instance.count == 1 %}
+        {% set instance_name = instance.name %}
       {% else %}
-        {% set server_name = [server.name, ("%03d" | format(serverindex,)) ] | join('_') %}
+        {% set instance_name = [instance.name, ("%03d" | format(instanceindex,)) ] | join('_') %}
       {% endif %}
-########### {{ server_name }} ###########
-      {% for portindex in range(server.ports | length) %}
-  {{ guid }}-server-{{ server_name }}-port-{{ portindex }}:
+########### {{ instance_name }} ###########
+      {% for portindex in range(instance.ports | length) %}
+  {{ instance_name }}-port-{{ portindex }}:
     type: OS::Neutron::Port
     properties:
-      name: {{ guid }}-server-{{ server_name }}-port-{{ portindex }}
-      network: { get_resource: {{ guid }}-network-{{ server.ports[portindex].network }} }
+      name: {{ instance_name }}-port-{{ portindex }}
+      network: { get_resource: {{ guid }}-network-{{ instance.ports[portindex].network }} }
       security_groups:
-        {% if server.ports[portindex].security_groups is defined %}
-          {% for security_group in server.ports[portindex].security_groups %}
+        {% if instance.ports[portindex].security_groups is defined %}
+          {% for security_group in instance.ports[portindex].security_groups %}
         - { get_resource: {{ guid }}-secgrp-{{ security_group }} }
           {% endfor %}
         {% endif %}
-        {% if server.ports[portindex].fixed_ips is defined %}
+        {% if instance.ports[portindex].fixed_ips is defined %}
       fixed_ips:
-          {% for fixed_ip in server.ports[portindex].fixed_ips %}
-        - subnet: { get_resource: {{ guid }}-network-{{ server.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }} }
+          {% for fixed_ip in instance.ports[portindex].fixed_ips %}
+        - subnet: { get_resource: {{ guid }}-network-{{ instance.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }} }
           ip_address: {{ fixed_ip.ip_address }}
           {% endfor %}
         {% endif %}
     depends_on:
-      - {{ guid }}-network-{{ server.ports[portindex].network }}
-        {% if server.ports[portindex].fixed_ips is defined %}
-          {% for fixed_ip in server.ports[portindex].fixed_ips %}
-      - {{ guid }}-network-{{ server.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }}
+      - {{ guid }}-network-{{ instance.ports[portindex].network }}
+        {% if instance.ports[portindex].fixed_ips is defined %}
+          {% for fixed_ip in instance.ports[portindex].fixed_ips %}
+      - {{ guid }}-network-{{ instance.ports[portindex].network }}-subnet-{{ fixed_ip.subnet }}
           {% endfor %}
         {% endif %}
-        {% if server.ports[portindex].security_groups is defined %}
-          {% for security_group in server.ports[portindex].security_groups %}
+        {% if instance.ports[portindex].security_groups is defined %}
+          {% for security_group in instance.ports[portindex].security_groups %}
       - {{ guid }}-secgrp-{{ security_group }}
           {% endfor %}
         {% endif %}
 
-        {% if server.ports[portindex].floating_ip is defined %}
-          {% if server.ports[portindex].floating_ip %}
-  {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}:
+        {% if instance.ports[portindex].floating_ip is defined %}
+          {% if instance.ports[portindex].floating_ip %}
+  {{ instance_name }}-fip-{{ portindex }}:
     type: OS::Neutron::FloatingIP
     properties:
-      floating_network: {{ provider_network }}
+      floating_network: {{ provider_network }} 
     depends_on:
-      - {{ guid }}-network-{{ server.ports[portindex].network }}-router
+      - {{ guid }}-network-{{ instance.ports[portindex].network }}-router
 
-  {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}-assoc:
+  {{ instance_name }}-fip-{{ portindex }}-assoc:
     type: OS::Neutron::FloatingIPAssociation
     properties:
-      floatingip_id: { get_resource: {{ guid }}-server-{{ server_name }}-fip-{{ portindex }} }
-      port_id: { get_resource: {{ guid }}-server-{{ server_name }}-port-{{ portindex }} }
+      floatingip_id: { get_resource: {{ instance_name }}-fip-{{ portindex }} }
+      port_id: { get_resource: {{ instance_name }}-port-{{ portindex }} }
     depends_on:
-      - {{ guid }}-server-{{ server_name }}-fip-{{ portindex }}
-      - {{ guid }}-server-{{ server_name }}-port-{{ portindex }}
+      - {{ instance_name }}-fip-{{ portindex }}
+      - {{ instance_name }}-port-{{ portindex }}
           {% endif %}
         {% endif %}
       {% endfor %}
 
-  {{ guid }}-server-{{ server_name }}:
+  {{ instance_name }}:
     type: OS::Nova::Server
     properties:
-      name: {{ guid }}-server-{{ server_name }}
-      flavor: {{ server.flavor }}
-      key_name: { get_resource: {{ guid }}-keypair }
-
+      name: {{ instance_name }}
+      flavor: {{ instance.flavor }}
+      key_name: { get_resource: {{ guid }}-infra_key }
       block_device_mapping_v2:
-        - image: {{ server.image_id | default(server.image) }}
+        - image: {{ instance.image_id | default(instance.image) }}
           delete_on_termination: true
-          volume_size: {{ server['rootfs_size'] | default(osp_default_rootfs_size) }}
+          volume_size: {{ instance.rootfs_size | default(osp_default_rootfs_size) }}
           boot_index: 0
-
       user_data: |
         #cloud-config
         ssh_authorized_keys: {{ all_ssh_authorized_keys | to_json }}
-{{ lookup('file', '../configs/{{ env_type }}/files/user_data/bastion', errors='ignore')}}
       user_data_format: RAW
       networks:
-      {% for portindex in range(server.ports | length) %}
-        - port: { get_resource: {{ guid }}-server-{{ server_name }}-port-{{ portindex }} }
+      {% for portindex in range(instance.ports | length) %}
+        - port: { get_resource: {{ instance_name }}-port-{{ portindex }} }
       {% endfor %}
-      {% if server.metadata is defined %}
-      metadata: {{ server.metadata | combine(default_metadata) | to_json }}
+      {% if instance.metadata is defined %}
+      metadata: {{ instance.metadata | combine(default_metadata) | to_json }}
       {% endif %}
-
-      {% if server.tags is defined %}
+      {% if instance.tags is defined %}
       # Convert EC2 tags
       metadata:
         {% for key, value in default_metadata.items() %}
         '{{ key }}': {{ value | to_json }}
         {% endfor %}
-        {% for tag in server.tags %}
+        {% for tag in instance.tags %}
         '{{ tag.key }}': {{ tag.value | to_json }}
         {% endfor %}
       {% else %}
-# No tag to associate to '{{ server_name }}' server
+      # No tag to associate to '{{ instance_name }}' instance
       {% endif %}
-
-      {% if server.ports is defined %}
+      {% if instance.ports is defined %}
     depends_on:
-        {% for portindex in range(server.ports | length) %}
-      - {{ guid }}-network-{{ server.ports[portindex].network }}-router
+        {% for portindex in range(instance.ports | length) %}
+      - {{ guid }}-network-{{ instance.ports[portindex].network }}-router
         {% endfor %}
       {% endif %}
 
-      {% if server.volumes is defined %}
-        {% for volumeindex in range(server.volumes | length) %}
-  {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}:
+      {% if instance.volumes is defined %}
+        {% for volumeindex in range(instance.volumes | length) %}
+  {{ instance_name }}-volume-{{ volumeindex }}:
     type: OS::Cinder::Volume
     properties:
-      size: {{ server.volumes[volumeindex].size }}
-      name: {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}
+      size: {{ instance.volumes[volumeindex].size }}
+      name: {{ instance_name }}-volume-{{ volumeindex }}
 
-  {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }}-attachment:
+  {{ instance_name }}-volume-{{ volumeindex }}-attachment:
     type: OS::Cinder::VolumeAttachment
     properties:
-      volume_id: { get_resource: {{ guid }}-server-{{ server_name }}-volume-{{ volumeindex }} }
-      instance_uuid: { get_resource: {{ guid }}-server-{{ server_name }} }
+      volume_id: { get_resource: {{ instance_name }}-volume-{{ volumeindex }} }
+      instance_uuid: { get_resource: {{ instance_name }} }
         {% endfor %}
       {% else %}
-# No volume to create for '{{ server_name }}' server
+  # No volume to create for '{{ instance_name }}' instance
       {% endif %}
     {% endfor %}
   {% endfor %}
 {% else %}
-# No server to create
+# No instance to create
 {% endif %}
 
 outputs:
 
-  {{ guid }}-keypair:
+  {{ guid }}-infra_key:
     description: SSH keypair (default)
-    value: { get_attr: [{{ guid }}-keypair, private_key] }
+    value: { get_attr: [{{ guid }}-infra_key, private_key] }
 
 {% if keypairs is defined %}
   {% for keypair in keypairs %}

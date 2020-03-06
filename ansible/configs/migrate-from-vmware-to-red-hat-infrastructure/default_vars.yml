@@ -1,6 +1,9 @@
 ---
 project_tag: "{{ env_type }}-{{ guid }}"
 
+#env_authorized_key: "{{ guid }}key"
+#set_env_authorized_key: true
+
 yum_repositories:
   - rhel-7-server-rpms:
       name: Red Hat Enterprise Linux 7
