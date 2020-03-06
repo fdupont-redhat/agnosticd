@@ -1,6 +1,4 @@
 ---
-#osp_cluster_dns_zone: blue.osp.opentlc.com
-
 networks:
   - name: internal
     shared: false
